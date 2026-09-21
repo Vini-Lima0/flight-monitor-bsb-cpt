@@ -1,0 +1,26 @@
+# ============================================================
+# Configuração da rota monitorada.
+# Edite os valores abaixo para trocar rota, datas ou preço-limite.
+# Nada aqui é segredo — tokens e senhas ficam em Secrets (ver README).
+# ============================================================
+
+# <-- EDITE AQUI: código IATA do aeroporto de origem
+origem: "BSB"
+
+# <-- EDITE AQUI: código IATA do aeroporto de destino
+destino: "CPT"
+
+# <-- EDITE AQUI: data de ida (formato AAAA-MM-DD)
+data_ida: "2026-11-10"
+
+# <-- EDITE AQUI: data de volta (formato AAAA-MM-DD)
+data_volta: "2026-11-24"
+
+# <-- EDITE AQUI: preço-limite. Qualquer leitura abaixo disso dispara alerta.
+preco_limite: 6500
+
+# <-- EDITE AQUI: moeda usada na busca e nos alertas
+moeda: "BRL"
+
+# <-- EDITE AQUI: e-mail que vai receber os alertas
+destinatario_email: "vinilpmoreira@gmail.com"
