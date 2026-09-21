@@ -19,6 +19,7 @@ import yaml
 from dotenv import load_dotenv
 
 import storage
+from datas import calcular_datas_busca
 from notify.email_notifier import enviar_email
 from notify.telegram import enviar_telegram
 from scrapers import google_flights, skyscanner
@@ -91,6 +92,21 @@ def main() -> int:
     load_dotenv()  # no-op se não houver .env (caso do GitHub Actions, que usa Secrets)
     cfg = carregar_config()
 
+    data_ida, data_volta, e_data_alvo = calcular_datas_busca(cfg)
+    cfg["data_ida"], cfg["data_volta"] = data_ida, data_volta
+    if e_data_alvo:
+        logger.info("Viagem alvo (%s a %s) já está dentro do horizonte de busca.", data_ida, data_volta)
+    else:
+        logger.info(
+            "Viagem alvo (%s a %s) ainda fora do horizonte de busca (%s dias). "
+            "Buscando a data máxima disponível hoje: %s a %s.",
+            cfg["data_ida_alvo"],
+            cfg["data_volta_alvo"],
+            cfg.get("horizonte_max_dias", 330),
+            data_ida,
+            data_volta,
+        )
+
     try:
         preco_atual, fonte = buscar_preco_atual(cfg)
     except RuntimeError as e:
@@ -99,7 +115,7 @@ def main() -> int:
 
     logger.info("Preço encontrado: %s %.2f (fonte: %s)", cfg["moeda"], preco_atual, fonte)
 
-    menor_historico = storage.lowest_historical_price()
+    menor_historico = storage.lowest_historical_price(data_ida, data_volta)
     storage.append_history(
         preco=preco_atual,
         moeda=cfg["moeda"],

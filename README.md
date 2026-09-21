@@ -76,14 +76,36 @@ aplicativos, sem usar sua senha normal.
 Edite `config.yaml` (não tem segredo nenhum aqui, pode commitar):
 
 ```yaml
-origem: "BSB"              # código IATA de origem
-destino: "CPT"              # código IATA de destino
-data_ida: "2026-11-10"      # AAAA-MM-DD
-data_volta: "2026-11-24"    # AAAA-MM-DD
-preco_limite: 6500           # dispara alerta se o preço cair abaixo disso
+origem: "BSB"                   # código IATA de origem
+destino: "CPT"                   # código IATA de destino
+data_ida_alvo: "2027-11-05"      # data de ida DESEJADA da viagem (AAAA-MM-DD)
+data_volta_alvo: "2027-11-15"    # data de volta DESEJADA da viagem (AAAA-MM-DD)
+horizonte_max_dias: 330           # quantos dias de antecedência dá pra buscar
+preco_limite: 6500                # dispara alerta se o preço cair abaixo disso
 moeda: "BRL"
 destinatario_email: "seu-email@exemplo.com"
 ```
+
+### Data alvo além do horizonte de busca (ex: viagem em novembro de 2027)
+
+A maioria das companhias aéreas (e por consequência o Google Flights e o
+Skyscanner) não deixa buscar/comprar passagens com mais de ~330 dias de
+antecedência. Se a `data_ida_alvo` estiver além desse horizonte, o bot **não
+falha nem espera** — ele busca automaticamente a data mais distante possível
+(hoje + `horizonte_max_dias`), mantendo a mesma duração de viagem entre
+`data_ida_alvo` e `data_volta_alvo` (no exemplo acima, 10 dias).
+
+A cada dia que passa, esse horizonte "anda junto" com o calendário e a data
+buscada se aproxima sozinha da data alvo — até que, em algum momento, a
+viagem alvo entra no horizonte de 330 dias e o bot passa a buscar
+exatamente `data_ida_alvo`/`data_volta_alvo` de verdade, e passa a ficar
+assim até a viagem acontecer.
+
+Cada leitura registrada em `data/history.csv` guarda as datas usadas
+naquela busca, e a comparação de "menor preço histórico" só olha leituras
+com o **mesmo par de datas** — assim, preços de datas provisórias diferentes
+(enquanto a viagem ainda está fora do horizonte) nunca são comparados entre
+si como se fossem a mesma passagem.
 
 ## Rodar localmente pra testar
 
@@ -167,8 +189,8 @@ privado e acompanhe seu consumo de minutos em **Settings → Billing**.
 
 ## Reusar pra outra rota/viagem
 
-Basta editar os 6 campos no topo de `config.yaml` (`origem`, `destino`,
-`data_ida`, `data_volta`, `preco_limite`, `destinatario_email`) — todo o
-resto do código é genérico e não precisa mudar. Se quiser manter o
+Basta editar os campos no topo de `config.yaml` (`origem`, `destino`,
+`data_ida_alvo`, `data_volta_alvo`, `preco_limite`, `destinatario_email`) —
+todo o resto do código é genérico e não precisa mudar. Se quiser manter o
 histórico da rota antiga, copie `data/history.csv` pra outro nome antes
 de zerar; o script sempre lê e escreve em `data/history.csv`.

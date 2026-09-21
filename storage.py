@@ -30,14 +30,22 @@ def append_history(preco: float, moeda: str, fonte: str, data_ida: str, data_vol
         )
 
 
-def lowest_historical_price() -> float | None:
-    """Menor preço já registrado no histórico (antes da leitura atual)."""
+def lowest_historical_price(data_ida: str, data_volta: str) -> float | None:
+    """Menor preço já registrado no histórico para o mesmo par de datas.
+
+    Filtra por data_ida/data_volta porque, enquanto a viagem alvo estiver
+    fora do horizonte de busca (ver datas.py), a data efetivamente buscada
+    muda a cada execução — comparar preços de datas diferentes como se
+    fossem a mesma viagem daria falsos "novo menor preço".
+    """
     if not os.path.exists(HISTORY_PATH):
         return None
     menor = None
     with open(HISTORY_PATH, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
+            if row.get("data_ida") != data_ida or row.get("data_volta") != data_volta:
+                continue
             try:
                 preco = float(row["preco"])
             except (KeyError, ValueError):
