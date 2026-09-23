@@ -20,7 +20,8 @@ def _yymmdd(data_iso: str) -> str:
     return datetime.strptime(data_iso, "%Y-%m-%d").strftime("%y%m%d")
 
 
-def _build_url(origem: str, destino: str, data_ida: str, data_volta: str) -> str:
+def montar_url(origem: str, destino: str, data_ida: str, data_volta: str, moeda: str) -> str:
+    """URL de busca do trajeto, já com rota e datas selecionadas."""
     return (
         f"{BASE_URL}/{origem.lower()}/{destino.lower()}/"
         f"{_yymmdd(data_ida)}/{_yymmdd(data_volta)}/"
@@ -32,7 +33,7 @@ def buscar_menor_preco(origem: str, destino: str, data_ida: str, data_volta: str
 
     Levanta RuntimeError se não conseguir extrair nenhum preço plausível.
     """
-    url = _build_url(origem, destino, data_ida, data_volta)
+    url = montar_url(origem, destino, data_ida, data_volta, moeda)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)

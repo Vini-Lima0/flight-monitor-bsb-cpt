@@ -25,11 +25,8 @@ data_volta_alvo: "2027-05-17"
 # e comum entre companhias internacionais.
 horizonte_max_dias: 330
 
-# <-- EDITE AQUI: preço-limite. Qualquer leitura abaixo disso dispara alerta.
-preco_limite: 6500
+# <-- EDITE AQUI: preço-limite. SÓ dispara alerta abaixo deste valor.
+preco_limite: 600
 
 # <-- EDITE AQUI: moeda usada na busca e nos alertas
 moeda: "BRL"
-
-# <-- EDITE AQUI: e-mail que vai receber os alertas
-destinatario_email: "vinilpmoreira@gmail.com"

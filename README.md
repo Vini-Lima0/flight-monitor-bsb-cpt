@@ -1,36 +1,37 @@
 # Monitor de preços de passagens — Brasília (BSB) ↔ Cape Town (CPT)
 
-Bot que roda a cada 30 minutos, busca o menor preço de uma rota no Google
-Flights (com fallback pro Skyscanner), compara com um preço-limite e com o
-menor preço já visto, e avisa por **Telegram e e-mail ao mesmo tempo**
-quando encontra um preço vantajoso.
+Bot agendado que busca o menor preço de uma rota no Google Flights (com
+fallback pro Skyscanner), compara com um preço-limite e avisa por
+**Telegram** quando o preço cai abaixo dele — com o link do trajeto já
+montado com as datas.
 
 ## Sumário
 
 1. [Como funciona](#como-funciona)
 2. [Passo a passo: criar o bot no Telegram](#passo-a-passo-criar-o-bot-no-telegram)
-3. [Passo a passo: senha de app do Gmail](#passo-a-passo-senha-de-app-do-gmail)
-4. [Configurar rota, datas e preço-limite](#configurar-rota-datas-e-preço-limite)
-5. [Rodar localmente pra testar](#rodar-localmente-pra-testar)
-6. [Subir pro GitHub e configurar os Secrets](#subir-pro-github-e-configurar-os-secrets)
-7. [Aviso sobre minutos do GitHub Actions](#aviso-sobre-minutos-do-github-actions)
-8. [Limites e riscos do scraping](#limites-e-riscos-do-scraping)
-9. [Reusar pra outra rota/viagem](#reusar-pra-outra-rotaviagem)
+3. [Configurar rota, datas e preço-limite](#configurar-rota-datas-e-preço-limite)
+4. [Rodar localmente pra testar](#rodar-localmente-pra-testar)
+5. [Subir pro GitHub e configurar os Secrets](#subir-pro-github-e-configurar-os-secrets)
+6. [Frequência real de execução e minutos do Actions](#frequência-real-de-execução-e-minutos-do-actions)
+7. [Limites e riscos do scraping](#limites-e-riscos-do-scraping)
+8. [Reusar pra outra rota/viagem](#reusar-pra-outra-rotaviagem)
 
 ## Como funciona
 
-1. `flight_monitor.py` lê `config.yaml` (rota, datas, preço-limite) e as
-   credenciais (variáveis de ambiente / Secrets).
+1. `flight_monitor.py` lê `config.yaml` (rota, datas, preço-limite) e o
+   token do Telegram (variáveis de ambiente / Secrets).
 2. Abre o Google Flights com Playwright (headless) e extrai o menor preço
    da página. Se isso falhar (timeout, layout mudou, bloqueio), tenta o
    Skyscanner como fallback.
 3. Registra a leitura em `data/history.csv` (data/hora, preço, fonte).
-4. Compara o preço atual com o `preco_limite` do config **e** com o menor
-   preço já registrado no histórico.
-5. Se for vantajoso **e** for um preço novo (menor que o último já
-   alertado, ver `data/alert_state.json`), dispara os dois alertas juntos:
-   Telegram e e-mail.
-6. O GitHub Actions roda esse script a cada 30 minutos e commita de volta
+4. **Só considera alertar se o preço estiver abaixo do `preco_limite`.**
+   Nada acima do limite vira alerta, mesmo que seja um novo mínimo
+   histórico. Se estiver abaixo, a mensagem informa também se é o menor
+   preço já registrado para aquela rota/datas.
+5. Se for um preço novo mais baixo que o último já alertado (ver
+   `data/alert_state.json`), envia o alerta no Telegram com o link do
+   trajeto já preenchido com rota e datas.
+6. O GitHub Actions roda esse script periodicamente e commita de volta
    o histórico atualizado, então o estado persiste entre execuções sem
    precisar do seu computador ligado.
 
@@ -49,27 +50,7 @@ quando encontra um preço vantajoso.
      (troque `<SEU_TOKEN>` pelo token do passo 3).
    - Na resposta JSON, procure por `"chat":{"id": ...}` — esse número
      (pode ser negativo) é o `TELEGRAM_CHAT_ID`.
-5. Guarde os dois valores — vão virar Secrets no GitHub (passo 6).
-
-## Passo a passo: senha de app do Gmail
-
-Uma "senha de app" é uma senha de 16 dígitos gerada pelo Google só pra
-aplicativos, sem usar sua senha normal.
-
-1. Ative a **verificação em duas etapas** na sua conta Google, se ainda
-   não tiver: https://myaccount.google.com/security
-2. Acesse https://myaccount.google.com/apppasswords (pode pedir login de
-   novo).
-3. Em "Nome do app", digite algo como `flight-monitor` e clique em
-   **Criar**.
-4. O Google mostra uma senha de 16 caracteres (ex: `abcd efgh ijkl mnop`).
-   Copie sem espaços — esse é o `EMAIL_APP_PASSWORD`.
-5. `EMAIL_SENDER` é o seu endereço Gmail completo (o mesmo da conta onde
-   você gerou a senha de app).
-
-> Quer usar outro provedor de e-mail (Outlook, Yahoo, SMTP próprio)? Só
-> trocar `SMTP_SERVER` e `SMTP_PORT` — o código em
-> `notify/email_notifier.py` não muda.
+5. Guarde os dois valores — vão virar Secrets no GitHub.
 
 ## Configurar rota, datas e preço-limite
 
@@ -77,13 +58,12 @@ Edite `config.yaml` (não tem segredo nenhum aqui, pode commitar):
 
 ```yaml
 origem: "BSB"                   # código IATA de origem
-destino: "CPT"                   # código IATA de destino
-data_ida_alvo: "2027-11-05"      # data de ida DESEJADA da viagem (AAAA-MM-DD)
-data_volta_alvo: "2027-11-15"    # data de volta DESEJADA da viagem (AAAA-MM-DD)
+destino: "SDU"                   # código IATA de destino
+data_ida_alvo: "2027-05-10"      # data de ida DESEJADA da viagem (AAAA-MM-DD)
+data_volta_alvo: "2027-05-17"    # data de volta DESEJADA da viagem (AAAA-MM-DD)
 horizonte_max_dias: 330           # quantos dias de antecedência dá pra buscar
-preco_limite: 6500                # dispara alerta se o preço cair abaixo disso
+preco_limite: 600                 # SÓ alerta abaixo deste valor
 moeda: "BRL"
-destinatario_email: "seu-email@exemplo.com"
 ```
 
 ### Data alvo além do horizonte de busca (ex: viagem em novembro de 2027)
@@ -120,54 +100,56 @@ pip install -r requirements.txt
 playwright install chromium
 
 cp .env.example .env
-# edite o .env e preencha TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
-# EMAIL_SENDER e EMAIL_APP_PASSWORD
+# edite o .env e preencha TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID
 
 python flight_monitor.py
 ```
 
 Se tudo estiver certo, você verá logs no terminal com o preço encontrado
-e, se for vantajoso, receberá o alerta no Telegram e no e-mail.
+e, se estiver abaixo do limite, receberá o alerta no Telegram.
 
 ## Subir pro GitHub e configurar os Secrets
 
 1. Crie um repositório no GitHub (veja o aviso sobre visibilidade
-   [abaixo](#aviso-sobre-minutos-do-github-actions)) e suba este código.
+   [abaixo](#frequência-real-de-execução-e-minutos-do-actions)) e suba este código.
 2. No repositório, vá em **Settings → Secrets and variables → Actions →
-   New repository secret** e cadastre, um por um:
+   New repository secret** e cadastre os dois:
 
-   | Nome                  | Valor                                             |
-   |------------------------|----------------------------------------------------|
-   | `TELEGRAM_BOT_TOKEN`   | token do BotFather                                 |
-   | `TELEGRAM_CHAT_ID`     | chat_id obtido no `getUpdates`                     |
-   | `EMAIL_SENDER`         | seu e-mail Gmail                                   |
-   | `EMAIL_APP_PASSWORD`   | a senha de app de 16 caracteres                    |
-   | `SMTP_SERVER`          | opcional, padrão `smtp.gmail.com` se não definido  |
-   | `SMTP_PORT`            | opcional, padrão `465` se não definido             |
+   | Nome                  | Valor                          |
+   |------------------------|---------------------------------|
+   | `TELEGRAM_BOT_TOKEN`   | token do BotFather              |
+   | `TELEGRAM_CHAT_ID`     | chat_id obtido no `getUpdates`  |
 
 3. Pronto — o workflow em `.github/workflows/monitor.yml` já está
-   configurado pra rodar a cada 30 minutos automaticamente
-   (`schedule: cron: "*/30 * * * *"`), e você também pode disparar uma
-   execução manual pela aba **Actions → Monitor de preços de
-   passagens → Run workflow**.
+   agendado (`schedule: cron: "*/30 * * * *"`), e você também pode
+   disparar uma execução manual pela aba **Actions → Monitor de preços
+   de passagens → Run workflow**.
 
-## Aviso sobre minutos do GitHub Actions
+## Frequência real de execução e minutos do Actions
 
-Rodar a cada 30 minutos significa **48 execuções por dia**. Em
-repositórios **privados**, o plano gratuito do GitHub Actions tem um
-limite mensal de minutos (2.000 min/mês pra contas pessoais no plano
-Free, em 2026) — com scraping + Playwright, cada execução pode levar de
-1 a 3 minutos, então isso pode estourar o limite ao longo do mês.
+⚠️ **O cron pede 30 minutos, mas o GitHub não cumpre isso.** Agendamentos
+do GitHub Actions são "best effort": sob carga, a plataforma atrasa ou
+simplesmente descarta execuções agendadas, e isso é mais agressivo em
+crons de alta frequência e em repositórios públicos (que rodam em filas
+de menor prioridade).
 
-**Recomendação:** deixe o repositório **público**. Repositórios públicos
-têm minutos **ilimitados** no GitHub Actions. Isso é seguro aqui porque
-nenhum segredo fica no código — tokens e senhas ficam exclusivamente em
-**GitHub Secrets**, que não aparecem nem no código-fonte nem nos logs do
-Actions mesmo em repositório público. O único dado "pessoal" que fica
-visível no repositório é o e-mail de destino em `config.yaml` e o
-histórico de preços da rota — se isso te incomoda, edite
-`destinatario_email` antes de tornar o repo público, ou mantenha o repo
-privado e acompanhe seu consumo de minutos em **Settings → Billing**.
+Medição real neste repositório com `cron: "*/30 * * * *"`: os intervalos
+entre execuções agendadas foram de **2h37 a 5h49, média de ~4 horas** —
+ou seja, cerca de 6 execuções por dia em vez das 48 pedidas. Não há
+configuração que conserte isso: é comportamento da plataforma.
+
+Se precisar de frequência real de 30 minutos, as saídas são rodar o
+script num serviço que você controla (uma VPS com `cron`, um Raspberry Pi
+ligado, ou um agendador tipo Render/Railway/Fly.io) em vez do GitHub
+Actions.
+
+**Sobre minutos:** em repositórios **privados**, o plano gratuito tem
+limite mensal (2.000 min/mês pra contas pessoais, em 2026) e cada
+execução com Playwright leva de 1 a 3 minutos. Em repositórios
+**públicos** os minutos são **ilimitados**, e é seguro aqui porque
+nenhum segredo fica no código — o token do Telegram fica exclusivamente
+em **GitHub Secrets**, que não aparecem no código-fonte nem nos logs. O
+único dado exposto no repositório é o histórico de preços da rota.
 
 ## Limites e riscos do scraping
 
@@ -177,7 +159,7 @@ privado e acompanhe seu consumo de minutos em **Settings → Billing**.
 - O script já trata isso com resiliência básica: se o Google Flights
   falhar, tenta o Skyscanner; se os dois falharem, o erro é logado e o
   workflow termina normalmente (sem marcar falha), tentando de novo na
-  próxima execução 30 minutos depois.
+  próxima execução.
 - Sites de busca de voos podem eventualmente detectar tráfego automatizado
   e bloquear ou mostrar CAPTCHA. Rodar a cada 30 minutos (e não com mais
   frequência) ajuda a manter um perfil de uso discreto, mas não elimina o
@@ -198,7 +180,7 @@ privado e acompanhe seu consumo de minutos em **Settings → Billing**.
 ## Reusar pra outra rota/viagem
 
 Basta editar os campos no topo de `config.yaml` (`origem`, `destino`,
-`data_ida_alvo`, `data_volta_alvo`, `preco_limite`, `destinatario_email`) —
+`data_ida_alvo`, `data_volta_alvo`, `preco_limite`) —
 todo o resto do código é genérico e não precisa mudar. Se quiser manter o
 histórico da rota antiga, copie `data/history.csv` pra outro nome antes
 de zerar; o script sempre lê e escreve em `data/history.csv`.

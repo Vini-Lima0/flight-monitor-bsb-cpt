@@ -18,9 +18,14 @@ logger = logging.getLogger(__name__)
 BASE_URL = "https://www.google.com/travel/flights"
 
 
-def _build_query(origem: str, destino: str, data_ida: str, data_volta: str) -> str:
+def montar_url(origem: str, destino: str, data_ida: str, data_volta: str, moeda: str) -> str:
+    """URL de busca do trajeto, já com rota e datas selecionadas.
+
+    É a mesma URL que o scraper abre — serve também para ir junto no alerta,
+    para você abrir direto o trajeto (não é link de pagamento/reserva).
+    """
     texto = f"voos de {origem} para {destino} em {data_ida} voltando em {data_volta}"
-    return f"{BASE_URL}?q={quote(texto)}&hl=pt-BR&curr={{moeda}}"
+    return f"{BASE_URL}?q={quote(texto)}&hl=pt-BR&curr={moeda}"
 
 
 def buscar_menor_preco(origem: str, destino: str, data_ida: str, data_volta: str, moeda: str) -> float:
@@ -28,7 +33,7 @@ def buscar_menor_preco(origem: str, destino: str, data_ida: str, data_volta: str
 
     Levanta RuntimeError se não conseguir extrair nenhum preço plausível.
     """
-    url = _build_query(origem, destino, data_ida, data_volta).format(moeda=moeda)
+    url = montar_url(origem, destino, data_ida, data_volta, moeda)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
