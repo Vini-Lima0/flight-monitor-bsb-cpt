@@ -138,10 +138,46 @@ entre execuções agendadas foram de **2h37 a 5h49, média de ~4 horas** —
 ou seja, cerca de 6 execuções por dia em vez das 48 pedidas. Não há
 configuração que conserte isso: é comportamento da plataforma.
 
-Se precisar de frequência real de 30 minutos, as saídas são rodar o
-script num serviço que você controla (uma VPS com `cron`, um Raspberry Pi
-ligado, ou um agendador tipo Render/Railway/Fly.io) em vez do GitHub
-Actions.
+Não adianta "forçar" isso dentro do Actions mantendo um runner vivo num
+loop de `sleep` 24/7: além de gambiarra, isso vai contra o ToS do GitHub
+Actions (uso não relacionado a build/teste/deploy do projeto) e pode
+fazer a conta ser sinalizada.
+
+### Solução adotada: execução local a cada 30 min (launchd)
+
+Para ter os 30 minutos de verdade, o `run_local.sh` roda no Mac via
+`launchd`, e o GitHub Actions continua ligado como rede de segurança
+para quando o Mac estiver desligado.
+
+O agente fica em `~/Library/LaunchAgents/com.vinilima.flightmonitor.plist`
+com `StartInterval` de 1800 segundos. Comandos úteis:
+
+```bash
+# ativar / desativar
+launchctl load  ~/Library/LaunchAgents/com.vinilima.flightmonitor.plist
+launchctl unload ~/Library/LaunchAgents/com.vinilima.flightmonitor.plist
+
+# ver se está ativo (coluna do meio é o último código de saída)
+launchctl list | grep flightmonitor
+
+# acompanhar as execuções
+tail -f local-run.log
+```
+
+O `run_local.sh` dá `git pull` antes e `git push` depois de cada
+execução, então o histórico e o estado de alerta ficam compartilhados
+entre as execuções locais e as do Actions — o mesmo preço não alerta
+duas vezes.
+
+Requisitos locais: `.venv` criada com `pip install -r requirements.txt` +
+`playwright install chromium`, e um arquivo `.env` (não versionado) com
+`TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID`.
+
+**Limitação:** com o Mac desligado ou dormindo, o `launchd` não roda —
+ele dispara uma vez ao acordar e retoma o ciclo de 30 min. Nesses
+períodos, quem cobre é o GitHub Actions (a cada ~4h). Para 30 minutos
+reais 24/7 sem depender do Mac, seria preciso uma VPS/Raspberry Pi
+ligado ou um agendador pago (Render/Railway/Fly.io).
 
 **Sobre minutos:** em repositórios **privados**, o plano gratuito tem
 limite mensal (2.000 min/mês pra contas pessoais, em 2026) e cada
