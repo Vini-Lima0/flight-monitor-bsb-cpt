@@ -8,17 +8,17 @@
 origem: "BSB"
 
 # <-- EDITE AQUI: código IATA do aeroporto de destino
-destino: "CPT"
+destino: "SDU"
 
 # <-- EDITE AQUI: data de ida DESEJADA da viagem (formato AAAA-MM-DD)
 # Se essa data estiver a mais de "horizonte_max_dias" de hoje (a maioria das
 # companhias/Google Flights não deixa buscar tão longe), o bot busca
 # automaticamente a data máxima disponível e vai se aproximando dessa data
 # alvo a cada execução, até ela entrar no horizonte de busca — ver README.
-data_ida_alvo: "2027-11-05"
+data_ida_alvo: "2027-05-10"
 
 # <-- EDITE AQUI: data de volta DESEJADA da viagem (formato AAAA-MM-DD)
-data_volta_alvo: "2027-11-15"
+data_volta_alvo: "2027-05-17"
 
 # <-- EDITE AQUI (raramente precisa): quantos dias de antecedência a maioria
 # das companhias aéreas permite buscar/comprar. 330 é um valor conservador
