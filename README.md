@@ -192,6 +192,18 @@ em **GitHub Secrets**, que não aparecem no código-fonte nem nos logs. O
 - **Não é uma API oficial.** Tanto o Google Flights quanto o Skyscanner
   podem mudar o layout da página a qualquer momento, o que quebra a
   extração de preços sem aviso prévio.
+- **O fallback do Skyscanner está bloqueado hoje.** Verificado em
+  2026-09-23: a página responde com a tela de detecção de bot ("Are you a
+  person or a robot?") e nenhum preço é extraído. Na prática, o Google
+  Flights é a única fonte funcionando; o fallback só falha de forma
+  silenciosa e o bot tenta de novo na execução seguinte.
+- **A URL da busca precisa ser o deep link `tfs=`.** Uma URL de texto
+  livre (`?q=voos de X para Y`) não preenche a rota: o Google carrega uma
+  página genérica, e os preços lidos ali são promoções sem relação com a
+  busca. Isso gerou leituras falsas (R$246, R$952) antes de ser corrigido.
+  O `montar_url()` em `scrapers/google_flights.py` monta o protobuf do
+  `tfs` na mão — se o Google mudar esse formato, é o primeiro lugar a
+  investigar.
 - O script já trata isso com resiliência básica: se o Google Flights
   falhar, tenta o Skyscanner; se os dois falharem, o erro é logado e o
   workflow termina normalmente (sem marcar falha), tentando de novo na

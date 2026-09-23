@@ -6,8 +6,8 @@ Google Flights não tem API pública. Isso aqui abre a página normal
 funcionar sem aviso — ver limitações no README.
 """
 
+import base64
 import logging
-from urllib.parse import quote
 
 from playwright.sync_api import sync_playwright
 
@@ -17,15 +17,61 @@ logger = logging.getLogger(__name__)
 
 BASE_URL = "https://www.google.com/travel/flights"
 
+# O Google Flights identifica a busca pelo parâmetro `tfs`: um protobuf
+# serializado e codificado em base64. Uma URL de texto livre (?q=voos de X
+# para Y) NÃO preenche a rota — cai numa página genérica cujos preços são
+# promoções não relacionadas à busca. Por isso montamos o protobuf na mão
+# (são poucos campos, não vale uma dependência de protobuf só pra isso).
+
+
+def _varint(n: int) -> bytes:
+    saida = bytearray()
+    while True:
+        b = n & 0x7F
+        n >>= 7
+        if n:
+            saida.append(b | 0x80)
+        else:
+            saida.append(b)
+            return bytes(saida)
+
+
+def _chave(campo: int, tipo: int) -> bytes:
+    return _varint((campo << 3) | tipo)
+
+
+def _submensagem(campo: int, payload: bytes) -> bytes:
+    return _chave(campo, 2) + _varint(len(payload)) + payload
+
+
+def _texto(campo: int, valor: str) -> bytes:
+    return _submensagem(campo, valor.encode())
+
+
+def _inteiro(campo: int, valor: int) -> bytes:
+    return _chave(campo, 0) + _varint(valor)
+
+
+def _trecho(data: str, origem: str, destino: str) -> bytes:
+    """Um trecho da viagem: data + aeroporto de origem (13) + destino (14)."""
+    return _texto(2, data) + _submensagem(13, _texto(2, origem)) + _submensagem(14, _texto(2, destino))
+
 
 def montar_url(origem: str, destino: str, data_ida: str, data_volta: str, moeda: str) -> str:
-    """URL de busca do trajeto, já com rota e datas selecionadas.
+    """URL do Google Flights com rota e datas já selecionadas.
 
-    É a mesma URL que o scraper abre — serve também para ir junto no alerta,
-    para você abrir direto o trajeto (não é link de pagamento/reserva).
+    É a mesma URL que o scraper abre — vai junto no alerta para você abrir
+    direto o trajeto (não é link de pagamento/reserva).
     """
-    texto = f"voos de {origem} para {destino} em {data_ida} voltando em {data_volta}"
-    return f"{BASE_URL}?q={quote(texto)}&hl=pt-BR&curr={moeda}"
+    busca = (
+        _submensagem(3, _trecho(data_ida, origem, destino))
+        + _submensagem(3, _trecho(data_volta, destino, origem))
+        + _inteiro(8, 1)  # 1 passageiro adulto
+        + _inteiro(9, 1)  # classe econômica
+        + _inteiro(19, 1)  # ida e volta
+    )
+    tfs = base64.b64encode(busca).decode()
+    return f"{BASE_URL}?tfs={tfs}&hl=pt-BR&curr={moeda}"
 
 
 def buscar_menor_preco(origem: str, destino: str, data_ida: str, data_volta: str, moeda: str) -> float:
