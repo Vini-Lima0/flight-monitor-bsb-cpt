@@ -1,4 +1,5 @@
-playwright==1.47.0
+# 1.47 fixa um greenlet sem wheel para Python 3.13 e falha ao instalar nele.
+playwright>=1.49
 PyYAML==6.0.2
 python-dotenv==1.0.1
 requests==2.32.3
