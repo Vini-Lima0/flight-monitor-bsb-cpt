@@ -1,25 +1,30 @@
-"""Monitor de preços de passagens aéreas.
+"""Monitor de preços de passagens aéreas, com datas flexíveis no mês.
 
 Fluxo:
-1. Lê config.yaml (rota/datas/preço-limite) e credenciais (env vars / .env local).
-2. Tenta o Google Flights; se falhar, cai para o Skyscanner.
-3. Registra a leitura no histórico (data/history.csv).
-4. Compara com o preço-limite (e reporta se também é o menor já visto).
-5. Se estiver abaixo do limite e for um preço novo mais baixo, alerta no Telegram.
+1. Lê config.yaml (rota, mês alvo, duração, preço-limite) e o token do
+   Telegram (variáveis de ambiente / .env local).
+2. Abre o calendário de preços do Google Flights em algumas datas semente
+   que, juntas, cobrem o mês inteiro, e coleta todas as combinações de
+   ida/volta com a duração pedida.
+3. Fica com a combinação mais barata e registra a leitura no histórico.
+4. Só considera alertar se esse preço estiver abaixo do preço-limite.
+5. Se for um preço novo mais baixo, alerta no Telegram com as datas
+   vencedoras e o link do trajeto.
 
-Qualquer erro de scraping é logado e o script termina sem quebrar o
-workflow — a próxima execução (30 min depois) tenta de novo.
+Erros de scraping são logados e o script termina sem quebrar o workflow —
+a próxima execução tenta de novo.
 """
 
 import logging
 import os
 import sys
+from datetime import date
 
 import yaml
 from dotenv import load_dotenv
 
 import storage
-from datas import calcular_datas_busca
+from datas import combinacao_valida, datas_semente
 from notify.telegram import enviar_telegram
 from scrapers import google_flights, skyscanner
 
@@ -37,33 +42,67 @@ def carregar_config() -> dict:
         return yaml.safe_load(f)
 
 
-def buscar_preco_atual(cfg: dict) -> tuple[float, str, str]:
-    """Tenta Google Flights primeiro; se falhar, cai para o Skyscanner.
+def buscar_melhor_combinacao(cfg: dict) -> tuple[float, date, date, str]:
+    """Varre o mês alvo e devolve (preco, ida, volta, fonte) mais barato.
 
-    Retorna (preco, fonte, url_do_trajeto). Levanta RuntimeError se ambas
-    as fontes falharem.
+    Levanta RuntimeError se nenhuma fonte devolver combinação utilizável.
     """
-    args = (cfg["origem"], cfg["destino"], cfg["data_ida"], cfg["data_volta"], cfg["moeda"])
+    sementes, dentro_do_mes = datas_semente(cfg)
+    if not dentro_do_mes:
+        logger.info(
+            "Mês alvo %s ainda está além do horizonte de busca (%s dias). "
+            "Buscando a data máxima alcançável hoje: %s.",
+            cfg["mes_alvo"],
+            cfg.get("horizonte_max_dias", 330),
+            sementes[0][0],
+        )
 
-    try:
-        logger.info("Buscando preço no Google Flights...")
-        preco = google_flights.buscar_menor_preco(*args)
-        return preco, "google_flights", google_flights.montar_url(*args)
-    except Exception as e:
-        logger.warning("Google Flights falhou (%s), tentando fallback no Skyscanner", e)
+    candidatas: list[tuple[float, date, date]] = []
+    for data_ida, data_volta in sementes:
+        try:
+            combinacoes = google_flights.buscar_combinacoes(
+                cfg["origem"], cfg["destino"], data_ida, data_volta, cfg["moeda"]
+            )
+        except Exception as e:
+            logger.warning("Calendário falhou para a semente %s (%s)", data_ida, e)
+            continue
 
+        if dentro_do_mes:
+            validas = [c for c in combinacoes if combinacao_valida(cfg, c[1], c[2])]
+        else:
+            # Fora do mês alvo só interessa manter a duração pedida.
+            validas = [c for c in combinacoes if (c[2] - c[1]).days == int(cfg["duracao_dias"])]
+
+        logger.info(
+            "Semente %s: %d combinações lidas, %d utilizáveis%s",
+            data_ida,
+            len(combinacoes),
+            len(validas),
+            f" (menor: {min(c[0] for c in validas):,.2f})" if validas else "",
+        )
+        candidatas.extend(validas)
+
+    if candidatas:
+        preco, ida, volta = min(candidatas, key=lambda c: c[0])
+        return preco, ida, volta, "google_flights"
+
+    # Fallback: par de datas fixo na primeira semente.
+    data_ida, data_volta = sementes[0]
     try:
-        preco = skyscanner.buscar_menor_preco(*args)
-        return preco, "skyscanner", skyscanner.montar_url(*args)
+        preco = skyscanner.buscar_menor_preco(
+            cfg["origem"], cfg["destino"], data_ida, data_volta, cfg["moeda"]
+        )
+        return preco, date.fromisoformat(data_ida), date.fromisoformat(data_volta), "skyscanner"
     except Exception as e:
         raise RuntimeError(f"Google Flights e Skyscanner falharam: {e}") from e
 
 
-def montar_mensagem(cfg: dict, preco: float, fonte: str, motivo: str, url: str) -> str:
+def montar_mensagem(cfg: dict, preco: float, ida: date, volta: date, fonte: str, motivo: str, url: str) -> str:
     return (
         f"✈️ Alerta de preço {cfg['origem']} → {cfg['destino']}\n"
-        f"Preço atual: {cfg['moeda']} {preco:,.2f}\n"
-        f"Ida: {cfg['data_ida']} | Volta: {cfg['data_volta']}\n"
+        f"Preço: {cfg['moeda']} {preco:,.2f}\n"
+        f"Melhores datas: {ida.strftime('%d/%m/%Y')} → {volta.strftime('%d/%m/%Y')} "
+        f"({(volta - ida).days} dias)\n"
         f"Motivo: {motivo}\n"
         f"Fonte: {fonte}\n"
         f"Ver trajeto: {url}"
@@ -84,41 +123,42 @@ def main() -> int:
     load_dotenv()  # no-op se não houver .env (caso do GitHub Actions, que usa Secrets)
     cfg = carregar_config()
 
-    data_ida, data_volta, e_data_alvo = calcular_datas_busca(cfg)
-    cfg["data_ida"], cfg["data_volta"] = data_ida, data_volta
-    if e_data_alvo:
-        logger.info("Viagem alvo (%s a %s) já está dentro do horizonte de busca.", data_ida, data_volta)
-    else:
-        logger.info(
-            "Viagem alvo (%s a %s) ainda fora do horizonte de busca (%s dias). "
-            "Buscando a data máxima disponível hoje: %s a %s.",
-            cfg["data_ida_alvo"],
-            cfg["data_volta_alvo"],
-            cfg.get("horizonte_max_dias", 330),
-            data_ida,
-            data_volta,
-        )
+    logger.info(
+        "Buscando %s → %s | mês %s | %s dias de viagem | datas flexíveis",
+        cfg["origem"],
+        cfg["destino"],
+        cfg["mes_alvo"],
+        cfg["duracao_dias"],
+    )
 
     try:
-        preco_atual, fonte, url = buscar_preco_atual(cfg)
+        preco_atual, ida, volta, fonte = buscar_melhor_combinacao(cfg)
     except RuntimeError as e:
         logger.error("Não foi possível obter o preço nesta execução: %s", e)
         return 0  # não quebra o workflow — tenta de novo na próxima execução
 
-    logger.info("Preço encontrado: %s %.2f (fonte: %s)", cfg["moeda"], preco_atual, fonte)
+    logger.info(
+        "Melhor combinação: %s %.2f em %s → %s (fonte: %s)",
+        cfg["moeda"],
+        preco_atual,
+        ida,
+        volta,
+        fonte,
+    )
 
-    menor_historico = storage.lowest_historical_price(data_ida, data_volta)
+    menor_historico = storage.lowest_historical_price(
+        cfg["mes_alvo"], int(cfg["duracao_dias"])
+    )
     storage.append_history(
         preco=preco_atual,
         moeda=cfg["moeda"],
         fonte=fonte,
-        data_ida=cfg["data_ida"],
-        data_volta=cfg["data_volta"],
+        data_ida=ida.isoformat(),
+        data_volta=volta.isoformat(),
     )
 
     # O preço-limite é a condição obrigatória: nada acima dele vira alerta,
-    # mesmo que seja um novo mínimo histórico (senão o bot avisaria de quedas
-    # que ainda estão muito acima do valor que você toparia pagar).
+    # mesmo que seja um novo mínimo histórico.
     if preco_atual >= cfg["preco_limite"]:
         logger.info(
             "Preço (%.2f) está acima do limite de %.2f. Nada a fazer.",
@@ -133,18 +173,21 @@ def main() -> int:
 
     estado = storage.load_alert_state()
     menor_ja_alertado = storage.lowest_alerted_price_for(
-        estado, cfg["origem"], cfg["destino"], data_ida, data_volta
+        estado, cfg["origem"], cfg["destino"], cfg["mes_alvo"], int(cfg["duracao_dias"])
     )
     if menor_ja_alertado is not None and preco_atual >= menor_ja_alertado:
         logger.info(
-            "Preço (%.2f) não é menor que o último já alertado (%.2f) para esta rota/data. "
+            "Preço (%.2f) não é menor que o último já alertado (%.2f) para esta rota/mês. "
             "Evitando alerta repetido.",
             preco_atual,
             menor_ja_alertado,
         )
         return 0
 
-    mensagem = montar_mensagem(cfg, preco_atual, fonte, " e ".join(motivos), url)
+    url = google_flights.montar_url(
+        cfg["origem"], cfg["destino"], ida.isoformat(), volta.isoformat(), cfg["moeda"]
+    )
+    mensagem = montar_mensagem(cfg, preco_atual, ida, volta, fonte, " e ".join(motivos), url)
     logger.info("Disparando alerta: %s", mensagem.replace("\n", " | "))
 
     try:
@@ -166,8 +209,10 @@ def main() -> int:
         {
             "origem": cfg["origem"],
             "destino": cfg["destino"],
-            "data_ida": data_ida,
-            "data_volta": data_volta,
+            "mes_alvo": cfg["mes_alvo"],
+            "duracao_dias": int(cfg["duracao_dias"]),
+            "data_ida": ida.isoformat(),
+            "data_volta": volta.isoformat(),
             "lowest_alerted_price": preco_atual,
         }
     )

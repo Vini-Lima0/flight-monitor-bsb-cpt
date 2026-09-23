@@ -25,7 +25,7 @@ def extract_prices(page_text: str, moeda: str) -> list[float]:
     valores = []
     for match in re.finditer(padrao, page_text):
         bruto = match.group(1)
-        valor = _para_float(bruto)
+        valor = parse_preco(bruto)
         if valor is not None and 200 <= valor <= 100_000:
             valores.append(valor)
     return valores
@@ -53,7 +53,7 @@ def escolher_menor_preco(precos: list[float]) -> tuple[float, bool]:
     return min(precos), False
 
 
-def _para_float(bruto: str) -> float | None:
+def parse_preco(bruto: str) -> float | None:
     """Converte '4.321', '4.321,00' ou '4,321.00' para float.
 
     O separador decimal x separador de milhar é ambíguo entre BRL e USD, então

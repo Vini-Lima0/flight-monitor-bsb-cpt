@@ -1,7 +1,7 @@
 # ============================================================
 # Configuração da rota monitorada.
-# Edite os valores abaixo para trocar rota, datas ou preço-limite.
-# Nada aqui é segredo — tokens e senhas ficam em Secrets (ver README).
+# Edite os valores abaixo para trocar rota, mês, duração ou preço-limite.
+# Nada aqui é segredo — o token do Telegram fica em Secrets (ver README).
 # ============================================================
 
 # <-- EDITE AQUI: código IATA do aeroporto de origem
@@ -10,19 +10,18 @@ origem: "BSB"
 # <-- EDITE AQUI: código IATA do aeroporto de destino
 destino: "SDU"
 
-# <-- EDITE AQUI: data de ida DESEJADA da viagem (formato AAAA-MM-DD)
-# Se essa data estiver a mais de "horizonte_max_dias" de hoje (a maioria das
-# companhias/Google Flights não deixa buscar tão longe), o bot busca
-# automaticamente a data máxima disponível e vai se aproximando dessa data
-# alvo a cada execução, até ela entrar no horizonte de busca — ver README.
-data_ida_alvo: "2027-05-10"
+# <-- EDITE AQUI: mês da viagem (AAAA-MM). As datas são flexíveis DENTRO
+# deste mês: o bot testa todas as datas de ida do mês e fica com a
+# combinação mais barata.
+mes_alvo: "2027-05"
 
-# <-- EDITE AQUI: data de volta DESEJADA da viagem (formato AAAA-MM-DD)
-data_volta_alvo: "2027-05-17"
+# <-- EDITE AQUI: quantos dias de viagem (ida -> volta)
+duracao_dias: 7
 
 # <-- EDITE AQUI (raramente precisa): quantos dias de antecedência a maioria
-# das companhias aéreas permite buscar/comprar. 330 é um valor conservador
-# e comum entre companhias internacionais.
+# das companhias aéreas permite buscar/comprar. Se o mês alvo ainda estiver
+# além disso, o bot busca a data máxima alcançável e se aproxima do mês alvo
+# conforme o tempo passa — ver README.
 horizonte_max_dias: 330
 
 # <-- EDITE AQUI: preço-limite. SÓ dispara alerta abaixo deste valor.

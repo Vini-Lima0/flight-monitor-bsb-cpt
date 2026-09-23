@@ -3,7 +3,7 @@
 import csv
 import json
 import os
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 HISTORY_PATH = os.path.join(os.path.dirname(__file__), "data", "history.csv")
 ALERT_STATE_PATH = os.path.join(os.path.dirname(__file__), "data", "alert_state.json")
@@ -30,13 +30,12 @@ def append_history(preco: float, moeda: str, fonte: str, data_ida: str, data_vol
         )
 
 
-def lowest_historical_price(data_ida: str, data_volta: str) -> float | None:
-    """Menor preço já registrado no histórico para o mesmo par de datas.
+def lowest_historical_price(mes_alvo: str, duracao_dias: int) -> float | None:
+    """Menor preço já registrado para o mesmo mês de viagem e duração.
 
-    Filtra por data_ida/data_volta porque, enquanto a viagem alvo estiver
-    fora do horizonte de busca (ver datas.py), a data efetivamente buscada
-    muda a cada execução — comparar preços de datas diferentes como se
-    fossem a mesma viagem daria falsos "novo menor preço".
+    Com datas flexíveis, a combinação vencedora muda de uma execução para
+    outra, então comparar por par de datas exato não faria sentido. O que
+    é comparável é "a melhor passagem de N dias naquele mês".
     """
     if not os.path.exists(HISTORY_PATH):
         return None
@@ -44,11 +43,13 @@ def lowest_historical_price(data_ida: str, data_volta: str) -> float | None:
     with open(HISTORY_PATH, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            if row.get("data_ida") != data_ida or row.get("data_volta") != data_volta:
-                continue
             try:
+                ida = date.fromisoformat(row["data_ida"])
+                volta = date.fromisoformat(row["data_volta"])
                 preco = float(row["preco"])
             except (KeyError, ValueError):
+                continue
+            if ida.strftime("%Y-%m") != mes_alvo or (volta - ida).days != duracao_dias:
                 continue
             if menor is None or preco < menor:
                 menor = preco
@@ -58,6 +59,8 @@ def lowest_historical_price(data_ida: str, data_volta: str) -> float | None:
 ALERT_STATE_DEFAULT = {
     "origem": None,
     "destino": None,
+    "mes_alvo": None,
+    "duracao_dias": None,
     "data_ida": None,
     "data_volta": None,
     "lowest_alerted_price": None,
@@ -75,19 +78,21 @@ def load_alert_state() -> dict:
     return {**ALERT_STATE_DEFAULT, **estado}
 
 
-def lowest_alerted_price_for(estado: dict, origem: str, destino: str, data_ida: str, data_volta: str) -> float | None:
-    """Preço já alertado, mas só se for para a MESMA rota e datas atuais.
+def lowest_alerted_price_for(
+    estado: dict, origem: str, destino: str, mes_alvo: str, duracao_dias: int
+) -> float | None:
+    """Preço já alertado, mas só se for para a MESMA viagem procurada.
 
-    Isso evita que o estado de alerta de uma rota/data antiga (ex: antes de
-    trocar o destino no config.yaml, ou enquanto a data ainda era provisória
-    por estar fora do horizonte de busca) suprima um alerta legítimo da
-    rota/data atual.
+    "Mesma viagem" aqui é rota + mês + duração, não um par de datas exato:
+    com datas flexíveis a combinação vencedora muda entre execuções, e
+    comparar por datas exatas faria o dedupe reiniciar toda hora. Trocar
+    destino, mês ou duração no config.yaml zera o dedupe automaticamente.
     """
     mesma_viagem = (
         estado.get("origem") == origem
         and estado.get("destino") == destino
-        and estado.get("data_ida") == data_ida
-        and estado.get("data_volta") == data_volta
+        and estado.get("mes_alvo") == mes_alvo
+        and estado.get("duracao_dias") == duracao_dias
     )
     return estado.get("lowest_alerted_price") if mesma_viagem else None
 

@@ -1,15 +1,15 @@
 # Monitor de preços de passagens — Brasília (BSB) ↔ Cape Town (CPT)
 
-Bot agendado que busca o menor preço de uma rota no Google Flights (com
-fallback pro Skyscanner), compara com um preço-limite e avisa por
-**Telegram** quando o preço cai abaixo dele — com o link do trajeto já
-montado com as datas.
+Bot agendado que procura a passagem mais barata de uma rota num mês, com
+datas flexíveis e duração fixa, compara com um preço-limite e avisa por
+**Telegram** quando o preço cai abaixo dele — com as datas vencedoras e o
+link do trajeto.
 
 ## Sumário
 
 1. [Como funciona](#como-funciona)
 2. [Passo a passo: criar o bot no Telegram](#passo-a-passo-criar-o-bot-no-telegram)
-3. [Configurar rota, datas e preço-limite](#configurar-rota-datas-e-preço-limite)
+3. [Configurar rota, mês, duração e preço-limite](#configurar-rota-mês-duração-e-preço-limite)
 4. [Rodar localmente pra testar](#rodar-localmente-pra-testar)
 5. [Subir pro GitHub e configurar os Secrets](#subir-pro-github-e-configurar-os-secrets)
 6. [Frequência real de execução e minutos do Actions](#frequência-real-de-execução-e-minutos-do-actions)
@@ -18,19 +18,20 @@ montado com as datas.
 
 ## Como funciona
 
-1. `flight_monitor.py` lê `config.yaml` (rota, datas, preço-limite) e o
-   token do Telegram (variáveis de ambiente / Secrets).
-2. Abre o Google Flights com Playwright (headless) e extrai o menor preço
-   da página. Se isso falhar (timeout, layout mudou, bloqueio), tenta o
-   Skyscanner como fallback.
-3. Registra a leitura em `data/history.csv` (data/hora, preço, fonte).
+1. `flight_monitor.py` lê `config.yaml` (rota, mês alvo, duração,
+   preço-limite) e o token do Telegram (variáveis de ambiente / Secrets).
+2. Abre o **calendário de preços** do Google Flights com Playwright
+   (headless) em 5 datas semente que, juntas, cobrem o mês inteiro, e lê
+   todas as combinações de ida/volta com a duração pedida.
+3. Fica com a combinação mais barata e registra a leitura em
+   `data/history.csv` (data/hora, preço, datas vencedoras, fonte).
 4. **Só considera alertar se o preço estiver abaixo do `preco_limite`.**
    Nada acima do limite vira alerta, mesmo que seja um novo mínimo
    histórico. Se estiver abaixo, a mensagem informa também se é o menor
-   preço já registrado para aquela rota/datas.
+   preço já registrado para aquele mês/duração.
 5. Se for um preço novo mais baixo que o último já alertado (ver
-   `data/alert_state.json`), envia o alerta no Telegram com o link do
-   trajeto já preenchido com rota e datas.
+   `data/alert_state.json`), envia o alerta no Telegram com as datas
+   vencedoras e o link do trajeto.
 6. O GitHub Actions roda esse script periodicamente e commita de volta
    o histórico atualizado, então o estado persiste entre execuções sem
    precisar do seu computador ligado.
@@ -52,40 +53,54 @@ montado com as datas.
      (pode ser negativo) é o `TELEGRAM_CHAT_ID`.
 5. Guarde os dois valores — vão virar Secrets no GitHub.
 
-## Configurar rota, datas e preço-limite
+## Configurar rota, mês, duração e preço-limite
 
 Edite `config.yaml` (não tem segredo nenhum aqui, pode commitar):
 
 ```yaml
-origem: "BSB"                   # código IATA de origem
-destino: "SDU"                   # código IATA de destino
-data_ida_alvo: "2027-05-10"      # data de ida DESEJADA da viagem (AAAA-MM-DD)
-data_volta_alvo: "2027-05-17"    # data de volta DESEJADA da viagem (AAAA-MM-DD)
-horizonte_max_dias: 330           # quantos dias de antecedência dá pra buscar
-preco_limite: 600                 # SÓ alerta abaixo deste valor
+origem: "BSB"            # código IATA de origem
+destino: "SDU"            # código IATA de destino
+mes_alvo: "2027-05"       # mês da viagem (AAAA-MM) — datas flexíveis dentro dele
+duracao_dias: 7            # quantos dias de viagem (ida -> volta)
+horizonte_max_dias: 330     # quantos dias de antecedência dá pra buscar
+preco_limite: 600           # SÓ alerta abaixo deste valor
 moeda: "BRL"
 ```
 
-### Data alvo além do horizonte de busca (ex: viagem em novembro de 2027)
+### Datas flexíveis dentro do mês
 
-A maioria das companhias aéreas (e por consequência o Google Flights e o
-Skyscanner) não deixa buscar/comprar passagens com mais de ~330 dias de
-antecedência. Se a `data_ida_alvo` estiver além desse horizonte, o bot **não
-falha nem espera** — ele busca automaticamente a data mais distante possível
-(hoje + `horizonte_max_dias`), mantendo a mesma duração de viagem entre
-`data_ida_alvo` e `data_volta_alvo` (no exemplo acima, 10 dias).
+Você não escolhe datas exatas — escolhe o **mês** e a **duração**. O bot
+testa todas as datas de ida do mês mantendo a duração pedida e fica com a
+combinação mais barata.
 
-A cada dia que passa, esse horizonte "anda junto" com o calendário e a data
-buscada se aproxima sozinha da data alvo — até que, em algum momento, a
-viagem alvo entra no horizonte de 330 dias e o bot passa a buscar
-exatamente `data_ida_alvo`/`data_volta_alvo` de verdade, e passa a ficar
-assim até a viagem acontecer.
+Isso é feito pelo **calendário de preços** do Google Flights, que devolve
+uma grade 7x7 (49 combinações de ida/volta com seus preços) por página
+carregada. Com 5 datas semente — dias 4, 11, 18, 25 e 31, cada uma cobrindo
+±3 dias — o mês inteiro é varrido em 5 carregamentos, e não em uma busca por
+combinação.
 
-Cada leitura registrada em `data/history.csv` guarda as datas usadas
-naquela busca, e a comparação de "menor preço histórico" só olha leituras
-com o **mesmo par de datas** — assim, preços de datas provisórias diferentes
-(enquanto a viagem ainda está fora do horizonte) nunca são comparados entre
-si como se fossem a mesma passagem.
+Cada célula da grade vem com um `aria-label` no formato
+`"R$ 795, 7 de mai. para 14 de mai."`, ou seja, preço e datas juntos. Por
+isso a extração aqui é bem mais confiável do que garimpar valores no texto
+solto da página: não há como atribuir um preço às datas erradas.
+
+O alerta informa quais foram as datas vencedoras, e o link aponta para essa
+combinação específica.
+
+### Mês alvo além do horizonte de busca
+
+A maioria das companhias aéreas não vende passagem com mais de ~330 dias de
+antecedência. Se o mês alvo inteiro ainda estiver além disso (ex: novembro
+de 2027 visto de setembro de 2026), o bot **não falha nem espera** — busca a
+data mais distante alcançável hoje, mantendo a duração pedida, e vai se
+aproximando do mês alvo conforme o calendário avança. Quando o mês entra no
+horizonte, a varredura por datas flexíveis começa a valer normalmente.
+
+A comparação de "menor preço histórico" agrupa por **mês + duração** (não
+por par de datas), que é o que faz sentido quando as datas são flexíveis: o
+que se compara é "a melhor passagem de N dias naquele mês". Trocar destino,
+mês ou duração no `config.yaml` zera o controle de alertas repetidos
+automaticamente.
 
 ## Rodar localmente pra testar
 
@@ -228,7 +243,7 @@ em **GitHub Secrets**, que não aparecem no código-fonte nem nos logs. O
 ## Reusar pra outra rota/viagem
 
 Basta editar os campos no topo de `config.yaml` (`origem`, `destino`,
-`data_ida_alvo`, `data_volta_alvo`, `preco_limite`) —
+`mes_alvo`, `duracao_dias`, `preco_limite`) —
 todo o resto do código é genérico e não precisa mudar. Se quiser manter o
 histórico da rota antiga, copie `data/history.csv` pra outro nome antes
 de zerar; o script sempre lê e escreve em `data/history.csv`.

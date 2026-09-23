@@ -8,10 +8,12 @@ funcionar sem aviso — ver limitações no README.
 
 import base64
 import logging
+import re
+from datetime import date
 
 from playwright.sync_api import sync_playwright
 
-from scrapers.common import escolher_menor_preco, extract_prices
+from scrapers.common import CURRENCY_SYMBOLS, parse_preco
 
 logger = logging.getLogger(__name__)
 
@@ -74,12 +76,67 @@ def montar_url(origem: str, destino: str, data_ida: str, data_volta: str, moeda:
     return f"{BASE_URL}?tfs={tfs}&hl=pt-BR&curr={moeda}"
 
 
-def buscar_menor_preco(origem: str, destino: str, data_ida: str, data_volta: str, moeda: str) -> float:
-    """Retorna o menor preço encontrado na página de resultados do Google Flights.
+# Cada célula do calendário de preços vem com um aria-label no formato
+# "R$ 795, 7 de mai. para 14 de mai." — preço e datas juntos, o que é bem
+# mais confiável do que garimpar valores no texto solto da página.
+MESES_PT = {
+    "jan": 1, "fev": 2, "mar": 3, "abr": 4, "mai": 5, "jun": 6,
+    "jul": 7, "ago": 8, "set": 9, "out": 10, "nov": 11, "dez": 12,
+}
 
-    Levanta RuntimeError se não conseguir extrair nenhum preço plausível.
+_CELULA = re.compile(
+    r"([\d.,]+),\s*(\d{1,2}) de ([a-zç]{3,4})\.?\s+para\s+(\d{1,2}) de ([a-zç]{3,4})\.?",
+    re.IGNORECASE,
+)
+
+
+def _com_ano(dia: int, mes: int, referencia: date) -> date | None:
+    """O calendário não informa o ano; deduz pelo ano mais próximo da semente."""
+    for ano in (referencia.year, referencia.year + 1, referencia.year - 1):
+        try:
+            candidata = date(ano, mes, dia)
+        except ValueError:
+            continue
+        if abs((candidata - referencia).days) <= 200:
+            return candidata
+    return None
+
+
+def _ler_calendario(page, moeda: str, referencia: date) -> list[tuple[float, date, date]]:
+    simbolo = CURRENCY_SYMBOLS.get(moeda.upper(), re.escape(moeda))
+    combinacoes = []
+    for elemento in page.locator("[aria-label]").all():
+        try:
+            rotulo = elemento.get_attribute("aria-label") or ""
+        except Exception:
+            continue
+        if not re.search(simbolo, rotulo):
+            continue
+        achado = _CELULA.search(re.sub(simbolo, "", rotulo))
+        if not achado:
+            continue
+        preco = parse_preco(achado.group(1))
+        mes_ida = MESES_PT.get(achado.group(3)[:3].lower())
+        mes_volta = MESES_PT.get(achado.group(5)[:3].lower())
+        if preco is None or not mes_ida or not mes_volta:
+            continue
+        ida = _com_ano(int(achado.group(2)), mes_ida, referencia)
+        volta = _com_ano(int(achado.group(4)), mes_volta, referencia)
+        if ida and volta and volta > ida:
+            combinacoes.append((preco, ida, volta))
+    return combinacoes
+
+
+def buscar_combinacoes(
+    origem: str, destino: str, data_ida: str, data_volta: str, moeda: str
+) -> list[tuple[float, date, date]]:
+    """Abre o calendário de preços em volta das datas dadas e devolve todas
+    as combinações (preço, ida, volta) que o Google mostrar na grade.
+
+    Levanta RuntimeError se não conseguir ler nenhuma combinação.
     """
     url = montar_url(origem, destino, data_ida, data_volta, moeda)
+    referencia = date.fromisoformat(data_ida)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -98,26 +155,17 @@ def buscar_menor_preco(origem: str, destino: str, data_ida: str, data_volta: str
                 except Exception:
                     pass
 
-            # Espera os resultados carregarem (a busca é feita via JS após o load).
-            page.wait_for_timeout(8_000)
-            try:
-                page.wait_for_load_state("networkidle", timeout=20_000)
-            except Exception:
-                logger.warning("networkidle não atingido a tempo, seguindo com o texto atual da página")
+            page.wait_for_timeout(7_000)
+            page.get_by_role("button", name="Calendário").click(timeout=15_000)
+            page.wait_for_timeout(6_000)
 
-            conteudo = page.inner_text("body")
+            combinacoes = _ler_calendario(page, moeda, referencia)
         finally:
             browser.close()
 
-    precos = extract_prices(conteudo, moeda)
-    if not precos:
-        raise RuntimeError("Nenhum preço encontrado na página do Google Flights (layout pode ter mudado)")
-
-    preco, confiavel = escolher_menor_preco(precos)
-    if not confiavel:
-        logger.warning(
-            "Preço %.2f aparece uma única vez na página (baixa confiança — "
-            "pode ser ruído de banner/sugestão não relacionado à rota buscada)",
-            preco,
+    if not combinacoes:
+        raise RuntimeError(
+            "Nenhuma combinação lida no calendário do Google Flights "
+            "(layout pode ter mudado ou a busca foi bloqueada)"
         )
-    return preco
+    return combinacoes
