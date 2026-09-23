@@ -20,10 +20,11 @@ def enviar_email(
     destinatario: str,
     assunto: str,
     corpo: str,
-) -> None:
+) -> bool:
+    """Envia o e-mail e retorna True se foi de fato enviado (credenciais presentes)."""
     if not remetente or not senha_app or not destinatario:
         logger.warning("Credenciais de e-mail incompletas, pulando alerta por e-mail")
-        return
+        return False
 
     msg = EmailMessage()
     msg["Subject"] = assunto
@@ -34,3 +35,4 @@ def enviar_email(
     with smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=15) as smtp:
         smtp.login(remetente, senha_app)
         smtp.send_message(msg)
+    return True

@@ -1,6 +1,7 @@
 """Helpers compartilhados pelos scrapers (extração de preço a partir de texto)."""
 
 import re
+from collections import Counter
 
 CURRENCY_SYMBOLS = {
     "BRL": r"R\$",
@@ -28,6 +29,28 @@ def extract_prices(page_text: str, moeda: str) -> list[float]:
         if valor is not None and 200 <= valor <= 100_000:
             valores.append(valor)
     return valores
+
+
+def escolher_menor_preco(precos: list[float]) -> tuple[float, bool]:
+    """Escolhe, entre os valores extraídos da página, o mais provável de ser
+    o preço real do voo buscado.
+
+    A extração é feita sobre o texto inteiro da página (ver extract_prices),
+    então pode capturar valores de banners/sugestões de outras rotas que nada
+    têm a ver com a busca. Como mitigação: o preço de um resultado de voo de
+    verdade costuma aparecer mais de uma vez na página (no card do resultado,
+    no resumo, no gráfico de preços), enquanto um valor "de ruído" tende a
+    aparecer uma única vez. Por isso, preferimos o menor valor que se repete;
+    só caímos para o menor valor absoluto (com uma flag de baixa confiança)
+    se nenhum se repetir.
+
+    Retorna (preco, confiavel).
+    """
+    contagem = Counter(precos)
+    repetidos = [preco for preco, n in contagem.items() if n >= 2]
+    if repetidos:
+        return min(repetidos), True
+    return min(precos), False
 
 
 def _para_float(bruto: str) -> float | None:

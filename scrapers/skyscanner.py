@@ -9,7 +9,7 @@ from datetime import datetime
 
 from playwright.sync_api import sync_playwright
 
-from scrapers.common import extract_prices
+from scrapers.common import escolher_menor_preco, extract_prices
 
 logger = logging.getLogger(__name__)
 
@@ -64,4 +64,11 @@ def buscar_menor_preco(origem: str, destino: str, data_ida: str, data_volta: str
     if not precos:
         raise RuntimeError("Nenhum preço encontrado na página do Skyscanner (layout pode ter mudado)")
 
-    return min(precos)
+    preco, confiavel = escolher_menor_preco(precos)
+    if not confiavel:
+        logger.warning(
+            "Preço %.2f aparece uma única vez na página (baixa confiança — "
+            "pode ser ruído de banner/sugestão não relacionado à rota buscada)",
+            preco,
+        )
+    return preco

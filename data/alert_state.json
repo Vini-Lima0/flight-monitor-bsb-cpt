@@ -1,3 +1,7 @@
 {
-  "lowest_alerted_price": 246.0
+  "origem": null,
+  "destino": null,
+  "data_ida": null,
+  "data_volta": null,
+  "lowest_alerted_price": null
 }

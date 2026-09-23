@@ -55,14 +55,41 @@ def lowest_historical_price(data_ida: str, data_volta: str) -> float | None:
     return menor
 
 
+ALERT_STATE_DEFAULT = {
+    "origem": None,
+    "destino": None,
+    "data_ida": None,
+    "data_volta": None,
+    "lowest_alerted_price": None,
+}
+
+
 def load_alert_state() -> dict:
     if not os.path.exists(ALERT_STATE_PATH):
-        return {"lowest_alerted_price": None}
+        return dict(ALERT_STATE_DEFAULT)
     with open(ALERT_STATE_PATH, encoding="utf-8") as f:
         try:
-            return json.load(f)
+            estado = json.load(f)
         except json.JSONDecodeError:
-            return {"lowest_alerted_price": None}
+            return dict(ALERT_STATE_DEFAULT)
+    return {**ALERT_STATE_DEFAULT, **estado}
+
+
+def lowest_alerted_price_for(estado: dict, origem: str, destino: str, data_ida: str, data_volta: str) -> float | None:
+    """Preço já alertado, mas só se for para a MESMA rota e datas atuais.
+
+    Isso evita que o estado de alerta de uma rota/data antiga (ex: antes de
+    trocar o destino no config.yaml, ou enquanto a data ainda era provisória
+    por estar fora do horizonte de busca) suprima um alerta legítimo da
+    rota/data atual.
+    """
+    mesma_viagem = (
+        estado.get("origem") == origem
+        and estado.get("destino") == destino
+        and estado.get("data_ida") == data_ida
+        and estado.get("data_volta") == data_volta
+    )
+    return estado.get("lowest_alerted_price") if mesma_viagem else None
 
 
 def save_alert_state(state: dict) -> None:

@@ -186,6 +186,14 @@ privado e acompanhe seu consumo de minutos em **Settings → Billing**.
   busca e até localização do servidor — o preço que o bot vê pode não ser
   idêntico ao que você veria navegando manualmente. Trate o alerta como um
   indicativo pra você conferir manualmente antes de comprar.
+- **Falso positivo conhecido:** a extração lê todo o texto da página
+  procurando por "R$ nnn", o que às vezes pega valores que não são da rota
+  buscada (ex: banners de "voos a partir de R$ 246" de outras promoções).
+  Como mitigação, o bot prefere o menor preço que aparece **repetido** na
+  página (resultados reais tendem a aparecer mais de uma vez) e loga um
+  aviso de "baixa confiança" quando não encontra repetição — mas isso é uma
+  heurística, não uma garantia. Sempre confira o preço manualmente antes de
+  comprar, principalmente se o alerta vier muito abaixo do esperado.
 
 ## Reusar pra outra rota/viagem
 

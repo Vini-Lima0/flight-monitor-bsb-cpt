@@ -69,13 +69,16 @@ def montar_mensagem(cfg: dict, preco: float, fonte: str, motivo: str) -> str:
     )
 
 
-def disparar_alertas(cfg: dict, mensagem: str) -> None:
-    enviar_telegram(
+def disparar_alertas(cfg: dict, mensagem: str) -> bool:
+    """Dispara Telegram e e-mail juntos. Retorna True se pelo menos um canal
+    estava configurado e foi de fato enviado (para não marcar como "alertado"
+    um preço que na prática não gerou nenhuma notificação)."""
+    enviado_telegram = enviar_telegram(
         token=os.environ.get("TELEGRAM_BOT_TOKEN", ""),
         chat_id=os.environ.get("TELEGRAM_CHAT_ID", ""),
         mensagem=mensagem,
     )
-    enviar_email(
+    enviado_email = enviar_email(
         # `or` (em vez de get(..., default)) porque secrets não configurados
         # no GitHub Actions chegam como string vazia, não como variável ausente.
         smtp_server=os.environ.get("SMTP_SERVER") or "smtp.gmail.com",
@@ -86,6 +89,7 @@ def disparar_alertas(cfg: dict, mensagem: str) -> None:
         assunto=f"Alerta de preço: {cfg['origem']} -> {cfg['destino']}",
         corpo=mensagem,
     )
+    return enviado_telegram or enviado_email
 
 
 def main() -> int:
@@ -135,10 +139,13 @@ def main() -> int:
         return 0
 
     estado = storage.load_alert_state()
-    menor_ja_alertado = estado.get("lowest_alerted_price")
+    menor_ja_alertado = storage.lowest_alerted_price_for(
+        estado, cfg["origem"], cfg["destino"], data_ida, data_volta
+    )
     if menor_ja_alertado is not None and preco_atual >= menor_ja_alertado:
         logger.info(
-            "Preço (%.2f) não é menor que o último já alertado (%.2f). Evitando alerta repetido.",
+            "Preço (%.2f) não é menor que o último já alertado (%.2f) para esta rota/data. "
+            "Evitando alerta repetido.",
             preco_atual,
             menor_ja_alertado,
         )
@@ -146,10 +153,31 @@ def main() -> int:
 
     mensagem = montar_mensagem(cfg, preco_atual, fonte, " e ".join(motivos))
     logger.info("Disparando alertas: %s", mensagem.replace("\n", " | "))
-    disparar_alertas(cfg, mensagem)
 
-    estado["lowest_alerted_price"] = preco_atual
-    storage.save_alert_state(estado)
+    try:
+        enviado = disparar_alertas(cfg, mensagem)
+    except Exception as e:
+        # Falha de rede/SMTP/API não deve derrubar o workflow — tenta de novo
+        # na próxima execução (o preço já foi registrado no histórico acima).
+        logger.error("Falha ao enviar alertas (Telegram/e-mail): %s", e)
+        return 0
+
+    if not enviado:
+        logger.warning(
+            "Nenhum canal de alerta está configurado (TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID "
+            "ou EMAIL_SENDER/EMAIL_APP_PASSWORD). Configure os GitHub Secrets — ver README."
+        )
+        return 0
+
+    storage.save_alert_state(
+        {
+            "origem": cfg["origem"],
+            "destino": cfg["destino"],
+            "data_ida": data_ida,
+            "data_volta": data_volta,
+            "lowest_alerted_price": preco_atual,
+        }
+    )
 
     return 0
 
