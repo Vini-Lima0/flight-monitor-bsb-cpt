@@ -4,3 +4,7 @@ __pycache__/
 .venv/
 venv/
 *.log
+
+# Perfil do navegador: contém cookies de sessão do Google (= acesso à conta).
+# Nunca deve ser commitado.
+.browser-profile/
