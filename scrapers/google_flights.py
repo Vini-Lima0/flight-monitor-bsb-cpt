@@ -164,7 +164,7 @@ def _ativar_aba_menores_precos(page, moeda: str) -> float | None:
             return None
 
     simbolo = CURRENCY_SYMBOLS.get(moeda.upper(), re.escape(moeda))
-    for _ in range(12):
+    for _ in range(16):
         page.wait_for_timeout(2_500)
         elemento, rotulo = _achar_aba_menores_precos(page)
         if elemento is None:
@@ -173,8 +173,11 @@ def _ativar_aba_menores_precos(page, moeda: str) -> float | None:
             selecionada = elemento.get_attribute("aria-selected") == "true"
         except Exception:
             selecionada = False
+        # "Buscando resultados" no rótulo significa que o preço exibido ainda é
+        # parcial: ele aparece junto com um valor que pode mudar em seguida.
+        carregando = re.search(r"buscando|searching", rotulo or "", re.IGNORECASE)
         achado = re.search(rf"{simbolo}\s*([\d.,]+)", rotulo or "")
-        if selecionada and achado:
+        if selecionada and achado and not carregando:
             preco = parse_preco(achado.group(1))
             logger.info("Aba 'Menores preços' carregada: %s", rotulo)
             return preco
