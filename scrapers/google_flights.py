@@ -127,16 +127,96 @@ def _ler_calendario(page, moeda: str, referencia: date) -> list[tuple[float, dat
     return combinacoes
 
 
+def _achar_aba_menores_precos(page):
+    """Devolve (elemento, rótulo) da aba 'Menores preços', ou (None, None)."""
+    for elemento in page.get_by_role("tab").all():
+        try:
+            rotulo = (elemento.get_attribute("aria-label") or elemento.inner_text() or "")
+        except Exception:
+            continue
+        rotulo = rotulo.replace("\n", " ").strip()
+        if "menores pre" in rotulo.lower():
+            return elemento, rotulo
+    return None, None
+
+
+def _ativar_aba_menores_precos(page, moeda: str) -> float | None:
+    """Ativa a aba 'Menores preços' e espera ela terminar de carregar.
+
+    A aba recalcula os preços de forma assíncrona: logo após o clique ela
+    ainda mostra os valores da aba "Melhor opção", que são mais altos. Só
+    consideramos pronta quando ela aparece selecionada E o rótulo já traz o
+    preço ("Menores preços a partir de R$ 795") — esse valor é o menor preço
+    para as datas buscadas, e é devolvido como resultado.
+    """
+    elemento, _ = _achar_aba_menores_precos(page)
+    if elemento is None:
+        logger.warning("Aba 'Menores preços' não encontrada — seguindo com a aba padrão")
+        return None
+
+    try:
+        elemento.click(timeout=10_000)
+    except Exception:
+        try:
+            elemento.dispatch_event("click")  # o clique normal às vezes é interceptado
+        except Exception:
+            logger.warning("Não consegui clicar na aba 'Menores preços'")
+            return None
+
+    simbolo = CURRENCY_SYMBOLS.get(moeda.upper(), re.escape(moeda))
+    for _ in range(12):
+        page.wait_for_timeout(2_500)
+        elemento, rotulo = _achar_aba_menores_precos(page)
+        if elemento is None:
+            continue
+        try:
+            selecionada = elemento.get_attribute("aria-selected") == "true"
+        except Exception:
+            selecionada = False
+        achado = re.search(rf"{simbolo}\s*([\d.,]+)", rotulo or "")
+        if selecionada and achado:
+            preco = parse_preco(achado.group(1))
+            logger.info("Aba 'Menores preços' carregada: %s", rotulo)
+            return preco
+
+    logger.warning("Aba 'Menores preços' não terminou de carregar a tempo")
+    return None
+
+
+def _abrir_calendario(page) -> bool:
+    """Abre o calendário de preços. O botão nem sempre está pronto de cara."""
+    for tentativa in range(3):
+        try:
+            botao = page.get_by_role("button", name="Calendário")
+            botao.click(timeout=10_000)
+            page.wait_for_timeout(6_000)
+            return True
+        except Exception:
+            if tentativa == 0:
+                try:
+                    page.keyboard.press("Escape")  # fecha overlay que possa cobrir o botão
+                except Exception:
+                    pass
+            page.wait_for_timeout(4_000)
+    logger.warning("Não consegui abrir o calendário de preços")
+    return False
+
+
 def buscar_combinacoes(
     origem: str, destino: str, data_ida: str, data_volta: str, moeda: str
 ) -> list[tuple[float, date, date]]:
-    """Abre o calendário de preços em volta das datas dadas e devolve todas
-    as combinações (preço, ida, volta) que o Google mostrar na grade.
+    """Combinações (preço, ida, volta) para as datas em volta das informadas.
+
+    Sempre ativa a aba "Menores preços" e espera ela carregar antes de ler
+    qualquer preço — a aba padrão ("Melhor opção") mostra valores mais altos,
+    por priorizar custo-benefício em vez do menor preço.
 
     Levanta RuntimeError se não conseguir ler nenhuma combinação.
     """
     url = montar_url(origem, destino, data_ida, data_volta, moeda)
     referencia = date.fromisoformat(data_ida)
+    ida_pedida = date.fromisoformat(data_ida)
+    volta_pedida = date.fromisoformat(data_volta)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -156,16 +236,31 @@ def buscar_combinacoes(
                     pass
 
             page.wait_for_timeout(7_000)
-            page.get_by_role("button", name="Calendário").click(timeout=15_000)
-            page.wait_for_timeout(6_000)
 
-            combinacoes = _ler_calendario(page, moeda, referencia)
+            # Ordem importa: o calendário precisa ser lido ANTES de trocar de
+            # aba — ativar "Menores preços" primeiro faz o botão do calendário
+            # sumir, e aí se perde a varredura de datas flexíveis.
+            combinacoes = []
+            if _abrir_calendario(page):
+                combinacoes = _ler_calendario(page, moeda, referencia)
+                try:
+                    page.keyboard.press("Escape")
+                    page.wait_for_timeout(2_000)
+                except Exception:
+                    pass
+
+            preco_da_aba = _ativar_aba_menores_precos(page, moeda)
         finally:
             browser.close()
 
+    # O preço da aba vale para as datas exatas que foram buscadas e costuma
+    # ser mais confiável que a grade, então entra como candidato próprio.
+    if preco_da_aba is not None:
+        combinacoes.append((preco_da_aba, ida_pedida, volta_pedida))
+
     if not combinacoes:
         raise RuntimeError(
-            "Nenhuma combinação lida no calendário do Google Flights "
+            "Nenhum preço lido no Google Flights "
             "(layout pode ter mudado ou a busca foi bloqueada)"
         )
     return combinacoes
