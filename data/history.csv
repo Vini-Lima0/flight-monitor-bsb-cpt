@@ -165,3 +165,4 @@ timestamp_utc,data_ida,data_volta,preco,moeda,fonte
 2026-10-21T09:33:03+00:00,2027-05-04,2027-05-11,754.0,BRL,google_flights
 2026-10-21T15:01:47+00:00,2027-05-04,2027-05-11,835.0,BRL,google_flights
 2026-10-21T19:17:25+00:00,2027-05-11,2027-05-18,877.0,BRL,google_flights
+2026-10-21T22:39:42+00:00,2027-05-04,2027-05-11,833.0,BRL,google_flights
