@@ -1,7 +1,9 @@
 {
   "origem": "BSB",
   "destino": "SDU",
-  "data_ida": "2027-05-10",
-  "data_volta": "2027-05-17",
-  "lowest_alerted_price": 816.0
+  "mes_alvo": "2027-05",
+  "duracao_dias": 7,
+  "data_ida": "2027-05-04",
+  "data_volta": "2027-05-11",
+  "lowest_alerted_price": 442.0
 }
